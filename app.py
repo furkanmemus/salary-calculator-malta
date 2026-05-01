@@ -1,7 +1,7 @@
 import streamlit as st
 
 # =========================
-# CONFIG (Kuralların)
+# CONFIG (Your rules)
 # =========================
 MONTHLY_STANDARD_HOURS = 173.33
 WEEKS_PER_YEAR = 52
@@ -11,12 +11,12 @@ NIGHT_BONUS_PER_HOUR = 2.0
 CARD_BONUS_PER_HOUR = 1.0
 ROULETTE_BONUS_PER_HOUR = 1.0
 
-LEVEL_RATE = {"Level 1 (1 €/saat)": 1.0, "Level 2 (2.5 €/saat)": 2.5}
-COMMITMENT_RATE = {"%10": 0.10, "%20": 0.20, "%30": 0.30, "%40": 0.40, "%50": 0.50}
+LEVEL_RATE = {"Level 1 (€1/hour)": 1.0, "Level 2 (€2.5/hour)": 2.5}
+COMMITMENT_RATE = {"10%": 0.10, "20%": 0.20, "30%": 0.30, "40%": 0.40, "50%": 0.50}
 
-OVERTIME_TAX_RATE = 0.25  # Overtime %25 flat tax (işyeri kuralı)
+OVERTIME_TAX_RATE = 0.25  # Overtime taxed at flat 25% (company rule)
 
-# Vergi (Single) - 2026 rate/subtract
+# Tax (Single) - 2026 rate/subtract
 TAX_TABLE_SINGLE_2026 = [
     (12000, 0.00, 0),
     (16000, 0.15, 1800),
@@ -42,8 +42,8 @@ def annual_income_tax_single_2026(chargeable_annual: float) -> float:
 
 def weekly_ssc_employee(weekly_wage: float, birth_year: int) -> float:
     """
-    Basitleştirilmiş Class 1 employee SSC:
-    - weekly <= 229.44  -> 22.94 fixed
+    Simplified Class 1 employee SSC:
+    - weekly <= 229.44  -> €22.94 fixed
     - born <= 1961: up to 490.38 -> 10% cap 49.04, above -> 49.04
     - born >= 1962: up to 559.30 -> 10% cap 55.93, above -> 55.93
     """
@@ -69,54 +69,59 @@ def monthly_ssc_from_monthly_base(base_monthly: float, birth_year: int) -> float
 # =========================
 # UI
 # =========================
-st.set_page_config(page_title="Maaş Hesaplayıcı (Malta)", layout="centered")
+st.set_page_config(page_title="Salary Calculator (Malta)", layout="centered")
 
-st.title("Maaş Hesaplayıcı (Malta) — TAHMİNİ NET")
-st.caption("Vergi: Single (2026 tablo) • SSC: basitleştirilmiş • Overtime: %25 flat tax")
+st.title("Salary Calculator (Malta) — ESTIMATED NET")
+st.caption("Tax: Single (2026 table) • SSC: simplified • Overtime: 25% flat tax")
 
-st.subheader("1) Base Maaş & Kişisel Bilgi")
-base = st.number_input("Bonussuz ham maaş (Base maaş) €", min_value=0.0, value=2000.0, step=50.0)
-birth_year = st.number_input("Doğum yılı", min_value=1900, max_value=2100, value=1995, step=1)
+with st.sidebar:
+    st.header("Notes")
+    st.write("This tool provides an estimate. Official payroll calculations may differ.")
+    st.write("Overtime is taxed separately at a flat 25% (company rule).")
 
-st.subheader("2) Fazla Mesai (Overtime)")
-overtime_hours = st.number_input("Fazla mesai saati", min_value=0.0, value=0.0, step=1.0)
+st.subheader("1) Base Salary & Personal Info")
+base = st.number_input("Base salary (gross) €", min_value=0.0, value=2000.0, step=50.0)
+birth_year = st.number_input("Year of birth", min_value=1900, max_value=2100, value=1995, step=1)
 
-st.subheader("3) Bonuslar")
-night_hours = st.number_input("Gece çalışılan saat", min_value=0.0, value=0.0, step=1.0)
+st.subheader("2) Overtime")
+overtime_hours = st.number_input("Overtime hours", min_value=0.0, value=0.0, step=1.0)
 
-table_hours = st.number_input("Toplam masa saati (SGC + Performans için)", min_value=0.0, value=0.0, step=1.0)
+st.subheader("3) Bonuses")
+night_hours = st.number_input("Night shift hours", min_value=0.0, value=0.0, step=1.0)
+
+table_hours = st.number_input("Total table hours (for SGC + Performance)", min_value=0.0, value=0.0, step=1.0)
 
 col1, col2 = st.columns(2)
 with col1:
-    sgc_level = st.selectbox("SGC bonus level", list(LEVEL_RATE.keys()), index=0)
+    sgc_level = st.selectbox("SGC level", list(LEVEL_RATE.keys()), index=0)
 with col2:
-    perf_level = st.selectbox("Performans bonus level", list(LEVEL_RATE.keys()), index=0)
+    perf_level = st.selectbox("Performance level", list(LEVEL_RATE.keys()), index=0)
 
-st.subheader("4) Kart / Rulet")
-card_eligible = st.checkbox("Kart bonusu alıyorum", value=False)
-card_hours = st.number_input("Kart masa saati", min_value=0.0, value=0.0, step=1.0, disabled=not card_eligible)
+st.subheader("4) Card / Roulette")
+card_eligible = st.checkbox("I receive Card bonus", value=False)
+card_hours = st.number_input("Card table hours", min_value=0.0, value=0.0, step=1.0, disabled=not card_eligible)
 
-roulette_eligible = st.checkbox("Rulet bonusu alıyorum", value=False)
-roulette_hours = st.number_input("Rulet masa saati", min_value=0.0, value=0.0, step=1.0, disabled=not roulette_eligible)
+roulette_eligible = st.checkbox("I receive Roulette bonus", value=False)
+roulette_hours = st.number_input("Roulette table hours", min_value=0.0, value=0.0, step=1.0, disabled=not roulette_eligible)
 
 st.subheader("5) Commitment")
 commitment_choice = st.selectbox(
-    "Commitment kademesi (gece hariç bonuslar üzerinden)",
+    "Commitment tier (applied to bonuses excluding night bonus)",
     list(COMMITMENT_RATE.keys()),
     index=0,
 )
 
 st.divider()
 
-# Validasyon: kart+rulet > masa olamaz
+# Validation: card+roulette cannot exceed total table hours
 if (card_hours + roulette_hours) > table_hours:
-    st.error("Kart + Rulet masa saatleri, toplam masa saatini GEÇEMEZ. Lütfen düzelt.")
+    st.error("Card hours + Roulette hours cannot exceed Total table hours. Please correct the values.")
     can_calc = False
 else:
     can_calc = True
 
-if st.button("Hesapla", type="primary", disabled=not can_calc):
-    # Saatlik (base üzerinden)
+if st.button("Calculate", type="primary", disabled=not can_calc):
+    # Hourly rate from base (fixed monthly hours)
     hourly_from_base = base / MONTHLY_STANDARD_HOURS if MONTHLY_STANDARD_HOURS > 0 else 0.0
 
     # Overtime
@@ -125,7 +130,7 @@ if st.button("Hesapla", type="primary", disabled=not can_calc):
     overtime_tax = overtime_gross * OVERTIME_TAX_RATE
     overtime_net = overtime_gross - overtime_tax
 
-    # Bonuslar
+    # Bonuses
     night_bonus = night_hours * NIGHT_BONUS_PER_HOUR
 
     sgc_rate = LEVEL_RATE[sgc_level]
@@ -137,47 +142,53 @@ if st.button("Hesapla", type="primary", disabled=not can_calc):
     card_bonus = (card_hours * CARD_BONUS_PER_HOUR) if card_eligible else 0.0
     roulette_bonus = (roulette_hours * ROULETTE_BONUS_PER_HOUR) if roulette_eligible else 0.0
 
-    bonus_excl_night = sgc_bonus + perf_bonus + card_bonus + roulette_bonus
+    bonuses_excl_night = sgc_bonus + perf_bonus + card_bonus + roulette_bonus
 
     commitment_rate = COMMITMENT_RATE[commitment_choice]
-    commitment_bonus = bonus_excl_night * commitment_rate
+    commitment_bonus = bonuses_excl_night * commitment_rate
 
-    total_bonuses = night_bonus + bonus_excl_night + commitment_bonus
+    total_bonuses = night_bonus + bonuses_excl_night + commitment_bonus
 
     # SSC (base only)
     ssc_monthly = monthly_ssc_from_monthly_base(base, int(birth_year))
 
-    # Gelir vergisi (overtime hariç)
+    # Income tax (overtime excluded)
     non_overtime_gross = base + total_bonuses
     chargeable_annual = max(0.0, (non_overtime_gross - ssc_monthly) * 12.0)
     annual_tax = annual_income_tax_single_2026(chargeable_annual)
     monthly_tax = annual_tax / 12.0
 
-    # Toplamlar
+    # Totals
     gross_total = non_overtime_gross + overtime_gross
     total_deductions = ssc_monthly + monthly_tax + overtime_tax
     net_total = gross_total - total_deductions
 
-    st.success(f"TAHMİNİ NET MAAŞ: €{net_total:,.2f}")
+    st.success(f"ESTIMATED NET SALARY: €{net_total:,.2f}")
 
-    st.write("### Döküm")
-    st.write(f"**Base (brüt):** €{base:,.2f}")
-    st.write(f"**SSC (aylık, base üstünden):** €{ssc_monthly:,.2f}")
-    st.write(f"**Gelir vergisi (overtime hariç, aylık tahmini):** €{monthly_tax:,.2f}")
-    st.write(f"**Overtime brüt:** €{overtime_gross:,.2f}  | **Overtime vergi (%25):** €{overtime_tax:,.2f} | **Overtime net:** €{overtime_net:,.2f}")
+    st.write("### Breakdown")
+    st.write(f"**Base (gross):** €{base:,.2f}")
+    st.write(f"**SSC (monthly, on base):** €{ssc_monthly:,.2f}")
+    st.write(f"**Income tax (monthly estimate, excluding overtime):** €{monthly_tax:,.2f}")
 
-    st.write("#### Bonuslar")
-    st.write(f"- Gece bonusu: €{night_bonus:,.2f}")
-    st.write(f"- SGC bonusu: €{sgc_bonus:,.2f}")
-    st.write(f"- Performans bonusu: €{perf_bonus:,.2f}")
-    st.write(f"- Kart bonusu: €{card_bonus:,.2f}")
-    st.write(f"- Rulet bonusu: €{roulette_bonus:,.2f}")
-    st.write(f"- Commitment bonusu ({commitment_choice}): €{commitment_bonus:,.2f}")
-    st.write(f"**Toplam bonus:** €{total_bonuses:,.2f}")
+    st.write("#### Overtime")
+    st.write(f"- Hourly rate from base: €{hourly_from_base:,.4f}")
+    st.write(f"- Overtime hourly (x1.5): €{overtime_hourly:,.4f}")
+    st.write(f"- Overtime gross: €{overtime_gross:,.2f}")
+    st.write(f"- Overtime tax (25%): €{overtime_tax:,.2f}")
+    st.write(f"- Overtime net: €{overtime_net:,.2f}")
 
-    st.write("#### Genel Toplam")
-    st.write(f"**Non-overtime brüt (base+bonus):** €{non_overtime_gross:,.2f}")
-    st.write(f"**Toplam brüt:** €{gross_total:,.2f}")
-    st.write(f"**Toplam kesinti:** €{total_deductions:,.2f}")
+    st.write("#### Bonuses")
+    st.write(f"- Night bonus: €{night_bonus:,.2f}")
+    st.write(f"- SGC bonus: €{sgc_bonus:,.2f}")
+    st.write(f"- Performance bonus: €{perf_bonus:,.2f}")
+    st.write(f"- Card bonus: €{card_bonus:,.2f}")
+    st.write(f"- Roulette bonus: €{roulette_bonus:,.2f}")
+    st.write(f"- Commitment bonus ({commitment_choice}): €{commitment_bonus:,.2f}")
+    st.write(f"**Total bonuses:** €{total_bonuses:,.2f}")
 
-    st.info("Not: Bu sonuç tahminidir. Bordro hesapları işyerine göre küçük farklılık gösterebilir.")
+    st.write("#### Totals")
+    st.write(f"- Non-overtime gross (base + bonuses): €{non_overtime_gross:,.2f}")
+    st.write(f"- Total gross: €{gross_total:,.2f}")
+    st.write(f"- Total deductions: €{total_deductions:,.2f}")
+
+    st.info("Note: This is an estimate. Official payroll (PAYE/SSC) calculations may differ.")
