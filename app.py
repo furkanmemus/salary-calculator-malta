@@ -24,6 +24,9 @@ TAX_TABLE_SINGLE_2026 = [
     (float("inf"), 0.35, 9400),
 ]
 
+# SSC assumption (most employees born 1962+)
+ASSUMED_BIRTH_YEAR = 1990  # forces the 1962+ branch in SSC cap logic
+
 
 # =========================
 # TAX / SSC
@@ -72,16 +75,16 @@ def monthly_ssc_from_monthly_base(base_monthly: float, birth_year: int) -> float
 st.set_page_config(page_title="Salary Calculator (Malta)", layout="centered")
 
 st.title("Salary Calculator (Malta) — ESTIMATED NET")
-st.caption("Tax: Single (2026 table) • SSC: simplified • Overtime: 25% flat tax")
+st.caption("Tax: Single (2026 table) • SSC: simplified (assumes 1962+) • Overtime: 25% flat tax")
 
 with st.sidebar:
     st.header("Notes")
     st.write("This tool provides an estimate. Official payroll calculations may differ.")
+    st.write("SSC is calculated with a simplified model (assumed 1962+ cap).")
     st.write("Overtime is taxed separately at a flat 25% (company rule).")
 
-st.subheader("1) Base Salary & Personal Info")
+st.subheader("1) Base Salary")
 base = st.number_input("Base salary (gross) €", min_value=0.0, value=2000.0, step=50.0)
-birth_year = st.number_input("Year of birth", min_value=1900, max_value=2100, value=1995, step=1)
 
 st.subheader("2) Overtime")
 overtime_hours = st.number_input("Overtime hours", min_value=0.0, value=0.0, step=1.0)
@@ -89,13 +92,28 @@ overtime_hours = st.number_input("Overtime hours", min_value=0.0, value=0.0, ste
 st.subheader("3) Bonuses")
 night_hours = st.number_input("Night shift hours", min_value=0.0, value=0.0, step=1.0)
 
-table_hours = st.number_input("Total table hours (for SGC + Performance)", min_value=0.0, value=0.0, step=1.0)
+# Eligibility switches for SGC / Performance
+colA, colB = st.columns(2)
+with colA:
+    sgc_eligible = st.checkbox("I receive SGC bonus", value=True)
+with colB:
+    perf_eligible = st.checkbox("I receive Performance bonus", value=True)
 
+# Total table hours should be provided if any table-based bonus is used
+# (SGC/Performance use total table hours, Card/Roulette hours must not exceed total table hours)
+table_hours = st.number_input(
+    "Total table hours (used for SGC/Performance and validation)",
+    min_value=0.0,
+    value=0.0,
+    step=1.0,
+)
+
+# Level selectors only if eligible
 col1, col2 = st.columns(2)
 with col1:
-    sgc_level = st.selectbox("SGC level", list(LEVEL_RATE.keys()), index=0)
+    sgc_level = st.selectbox("SGC level", list(LEVEL_RATE.keys()), index=0, disabled=not sgc_eligible)
 with col2:
-    perf_level = st.selectbox("Performance level", list(LEVEL_RATE.keys()), index=0)
+    perf_level = st.selectbox("Performance level", list(LEVEL_RATE.keys()), index=0, disabled=not perf_eligible)
 
 st.subheader("4) Card / Roulette")
 card_eligible = st.checkbox("I receive Card bonus", value=False)
@@ -105,21 +123,41 @@ roulette_eligible = st.checkbox("I receive Roulette bonus", value=False)
 roulette_hours = st.number_input("Roulette table hours", min_value=0.0, value=0.0, step=1.0, disabled=not roulette_eligible)
 
 st.subheader("5) Commitment")
+commitment_eligible = st.checkbox("I receive Commitment bonus", value=True)
 commitment_choice = st.selectbox(
     "Commitment tier (applied to bonuses excluding night bonus)",
     list(COMMITMENT_RATE.keys()),
     index=0,
+    disabled=not commitment_eligible,
 )
 
 st.divider()
 
-# Validation: card+roulette cannot exceed total table hours
+# =========================
+# Validation rules
+# =========================
+# If any of card/roulette hours > 0, total table hours must be >= their sum.
+# Also, if SGC or Performance eligible, total table hours should be > 0 (otherwise bonus will be 0).
+needs_table_hours = sgc_eligible or perf_eligible or card_eligible or roulette_eligible
+
+validation_errors = []
+
 if (card_hours + roulette_hours) > table_hours:
-    st.error("Card hours + Roulette hours cannot exceed Total table hours. Please correct the values.")
+    validation_errors.append("Card hours + Roulette hours cannot exceed Total table hours.")
+
+if needs_table_hours and table_hours == 0 and (sgc_eligible or perf_eligible):
+    validation_errors.append("Total table hours is 0, but SGC/Performance is enabled. Please enter table hours (or disable those bonuses).")
+
+if validation_errors:
+    for e in validation_errors:
+        st.error(e)
     can_calc = False
 else:
     can_calc = True
 
+# =========================
+# Calculate
+# =========================
 if st.button("Calculate", type="primary", disabled=not can_calc):
     # Hourly rate from base (fixed monthly hours)
     hourly_from_base = base / MONTHLY_STANDARD_HOURS if MONTHLY_STANDARD_HOURS > 0 else 0.0
@@ -133,8 +171,8 @@ if st.button("Calculate", type="primary", disabled=not can_calc):
     # Bonuses
     night_bonus = night_hours * NIGHT_BONUS_PER_HOUR
 
-    sgc_rate = LEVEL_RATE[sgc_level]
-    perf_rate = LEVEL_RATE[perf_level]
+    sgc_rate = LEVEL_RATE[sgc_level] if sgc_eligible else 0.0
+    perf_rate = LEVEL_RATE[perf_level] if perf_eligible else 0.0
 
     sgc_bonus = table_hours * sgc_rate
     perf_bonus = table_hours * perf_rate
@@ -144,13 +182,13 @@ if st.button("Calculate", type="primary", disabled=not can_calc):
 
     bonuses_excl_night = sgc_bonus + perf_bonus + card_bonus + roulette_bonus
 
-    commitment_rate = COMMITMENT_RATE[commitment_choice]
+    commitment_rate = COMMITMENT_RATE[commitment_choice] if commitment_eligible else 0.0
     commitment_bonus = bonuses_excl_night * commitment_rate
 
     total_bonuses = night_bonus + bonuses_excl_night + commitment_bonus
 
-    # SSC (base only)
-    ssc_monthly = monthly_ssc_from_monthly_base(base, int(birth_year))
+    # SSC (base only, assumed 1962+)
+    ssc_monthly = monthly_ssc_from_monthly_base(base, ASSUMED_BIRTH_YEAR)
 
     # Income tax (overtime excluded)
     non_overtime_gross = base + total_bonuses
@@ -183,7 +221,10 @@ if st.button("Calculate", type="primary", disabled=not can_calc):
     st.write(f"- Performance bonus: €{perf_bonus:,.2f}")
     st.write(f"- Card bonus: €{card_bonus:,.2f}")
     st.write(f"- Roulette bonus: €{roulette_bonus:,.2f}")
-    st.write(f"- Commitment bonus ({commitment_choice}): €{commitment_bonus:,.2f}")
+    if commitment_eligible:
+        st.write(f"- Commitment bonus ({commitment_choice}): €{commitment_bonus:,.2f}")
+    else:
+        st.write(f"- Commitment bonus: €{commitment_bonus:,.2f}")
     st.write(f"**Total bonuses:** €{total_bonuses:,.2f}")
 
     st.write("#### Totals")
